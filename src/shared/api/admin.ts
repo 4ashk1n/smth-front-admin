@@ -5,6 +5,8 @@
   AdminUserListResponse,
   ArticleResponse,
   ArticleStatus,
+  ReviewRemarkListResponse,
+  ReviewRemarkResponse,
   UserMeta,
   UserMetricsResponse,
 } from "@smth/shared";
@@ -83,5 +85,24 @@ export function getUserMetrics(userId: string): Promise<UserMetricsResponse> {
 export function getArticleById(articleId: string): Promise<ArticleResponse> {
   return requestWithAutoRefresh<ArticleResponse>(`/articles/${articleId}`, {
     method: "GET",
+  });
+}
+
+export function getArticleRemarks(articleId: string): Promise<ReviewRemarkListResponse> {
+  return requestWithAutoRefresh<ReviewRemarkListResponse>(`/admin/articles/${articleId}/remarks`, {
+    method: "GET",
+  });
+}
+
+export function upsertArticleRemark(articleId: string, blockId: string, text: string): Promise<ReviewRemarkResponse> {
+  return requestWithAutoRefresh<ReviewRemarkResponse>(`/admin/articles/${articleId}/remarks/${blockId}`, {
+    method: "PUT",
+    body: { text },
+  });
+}
+
+export function deleteArticleRemark(articleId: string, blockId: string): Promise<ReviewRemarkResponse> {
+  return requestWithAutoRefresh<ReviewRemarkResponse>(`/admin/articles/${articleId}/remarks/${blockId}`, {
+    method: "DELETE",
   });
 }

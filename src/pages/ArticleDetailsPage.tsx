@@ -1,10 +1,33 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge, Box, Button, Card, Code, Divider, Grid, Group, Paper, ScrollArea, Stack, Table, Text, Title } from "@mantine/core";
+import {
+  Badge,
+  Box,
+  Button,
+  Card,
+  Code,
+  Divider,
+  Grid,
+  Group,
+  Paper,
+  ScrollArea,
+  Stack,
+  Table,
+  Text,
+  Textarea,
+  Title,
+} from "@mantine/core";
 import { showNotification } from "@mantine/notifications";
-import { IconArrowLeft } from "@tabler/icons-react";
-import type { Article, ArticleStatus } from "@smth/shared";
+import { IconArrowLeft, IconCheck, IconTrash, IconX } from "@tabler/icons-react";
+import type { Article, ArticleStatus, ReviewRemark } from "@smth/shared";
 import { useNavigate, useParams } from "react-router-dom";
-import { getArticleById } from "../shared/api";
+import {
+  approveArticle,
+  deleteArticleRemark,
+  getArticleById,
+  getArticleRemarks,
+  rejectArticle,
+  upsertArticleRemark,
+} from "../shared/api";
 import { formatDateTime } from "../shared/lib/formatDateTime";
 import { getErrorMessage } from "../shared/lib/getErrorMessage";
 import { statusColor, statusLabel } from "../shared/lib/status";
@@ -118,19 +141,41 @@ function statusBadge(status: ArticleStatus) {
   );
 }
 
+function toRemarkMap(remarks: ReviewRemark[]): Record<string, ReviewRemark> {
+  return remarks.reduce<Record<string, ReviewRemark>>((acc, remark) => {
+    acc[remark.blockId] = remark;
+    return acc;
+  }, {});
+}
+
 export function ArticleDetailsPage() {
   const { articleId } = useParams<{ articleId: string }>();
   const navigate = useNavigate();
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(false);
+  const [moderating, setModerating] = useState(false);
+  const [savingRemarkBlockId, setSavingRemarkBlockId] = useState<string | null>(null);
+  const [deletingRemarkBlockId, setDeletingRemarkBlockId] = useState<string | null>(null);
+  const [remarksByBlock, setRemarksByBlock] = useState<Record<string, ReviewRemark>>({});
+  const [remarkDrafts, setRemarkDrafts] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     if (!articleId) return;
 
     setLoading(true);
     try {
-      const response = await getArticleById(articleId);
-      setArticle(response.data);
+      const [articleResponse, remarksResponse] = await Promise.all([
+        getArticleById(articleId),
+        getArticleRemarks(articleId),
+      ]);
+      setArticle(articleResponse.data);
+      setRemarksByBlock(toRemarkMap(remarksResponse.data));
+      setRemarkDrafts(
+        remarksResponse.data.reduce<Record<string, string>>((acc, remark) => {
+          acc[remark.blockId] = remark.text;
+          return acc;
+        }, {}),
+      );
     } catch (error) {
       showNotification({
         color: "red",
@@ -147,6 +192,97 @@ export function ArticleDetailsPage() {
   }, [load]);
 
   const tree = useMemo(() => parseContentTree(article?.content), [article?.content]);
+
+  const handleModeration = useCallback(async (action: "approve" | "reject") => {
+    if (!articleId || !article) return;
+
+    setModerating(true);
+    try {
+      const response = action === "approve" ? await approveArticle(articleId) : await rejectArticle(articleId);
+      setArticle({
+        ...article,
+        status: response.data.status,
+        publishedAt: response.data.publishedAt,
+        updatedAt: response.data.updatedAt,
+      });
+
+      showNotification({
+        color: "teal",
+        title: "Статус обновлен",
+        message: action === "approve" ? "Статья опубликована" : "Статья возвращена в draft",
+      });
+    } catch (error) {
+      showNotification({
+        color: "red",
+        title: "Ошибка модерации",
+        message: getErrorMessage(error, "Не удалось изменить статус статьи"),
+      });
+    } finally {
+      setModerating(false);
+    }
+  }, [articleId, article]);
+
+  const handleSaveRemark = useCallback(async (blockId: string) => {
+    if (!articleId) return;
+
+    const text = (remarkDrafts[blockId] ?? "").trim();
+    if (!text) {
+      showNotification({
+        color: "yellow",
+        title: "Пустой комментарий",
+        message: "Введите текст замечания перед сохранением",
+      });
+      return;
+    }
+
+    setSavingRemarkBlockId(blockId);
+    try {
+      const response = await upsertArticleRemark(articleId, blockId, text);
+      setRemarksByBlock((prev) => ({ ...prev, [blockId]: response.data }));
+      setRemarkDrafts((prev) => ({ ...prev, [blockId]: response.data.text }));
+      showNotification({
+        color: "teal",
+        title: "Замечание сохранено",
+        message: `Block ${blockId}`,
+      });
+    } catch (error) {
+      showNotification({
+        color: "red",
+        title: "Ошибка сохранения",
+        message: getErrorMessage(error, "Не удалось сохранить замечание"),
+      });
+    } finally {
+      setSavingRemarkBlockId(null);
+    }
+  }, [articleId, remarkDrafts]);
+
+  const handleDeleteRemark = useCallback(async (blockId: string) => {
+    if (!articleId) return;
+
+    setDeletingRemarkBlockId(blockId);
+    try {
+      await deleteArticleRemark(articleId, blockId);
+      setRemarksByBlock((prev) => {
+        const next = { ...prev };
+        delete next[blockId];
+        return next;
+      });
+      setRemarkDrafts((prev) => ({ ...prev, [blockId]: "" }));
+      showNotification({
+        color: "teal",
+        title: "Замечание удалено",
+        message: `Block ${blockId}`,
+      });
+    } catch (error) {
+      showNotification({
+        color: "red",
+        title: "Ошибка удаления",
+        message: getErrorMessage(error, "Не удалось удалить замечание"),
+      });
+    } finally {
+      setDeletingRemarkBlockId(null);
+    }
+  }, [articleId]);
 
   if (!articleId) {
     return (
@@ -172,7 +308,30 @@ export function ArticleDetailsPage() {
           <Title order={2}>Статья</Title>
           <Text c="dimmed" size="sm">articleId: {articleId}</Text>
         </div>
-        <Button variant="default" loading={loading} onClick={() => void load()}>Обновить</Button>
+        <Group>
+          <Button variant="default" loading={loading} onClick={() => void load()}>Обновить</Button>
+          {article?.status === "review" && (
+            <>
+              <Button
+                leftSection={<IconCheck size={14} />}
+                color="teal"
+                loading={moderating}
+                onClick={() => void handleModeration("approve")}
+              >
+                Approve
+              </Button>
+              <Button
+                leftSection={<IconX size={14} />}
+                color="red"
+                variant="light"
+                loading={moderating}
+                onClick={() => void handleModeration("reject")}
+              >
+                Reject
+              </Button>
+            </>
+          )}
+        </Group>
       </Group>
 
       {article && (
@@ -245,33 +404,80 @@ export function ArticleDetailsPage() {
                           </Group>
 
                           <ScrollArea mt="sm">
-                            <Table miw={980} verticalSpacing="xs">
+                            <Table miw={1220} verticalSpacing="xs">
                               <Table.Thead>
                                 <Table.Tr>
-                                  <Table.Th style={{ width: 120 }}>Order</Table.Th>
-                                  <Table.Th style={{ width: 120 }}>Type</Table.Th>
+                                  <Table.Th style={{ width: 90 }}>Order</Table.Th>
+                                  <Table.Th style={{ width: 100 }}>Type</Table.Th>
                                   <Table.Th style={{ width: 180 }}>Block ID</Table.Th>
-                                  <Table.Th>Layout</Table.Th>
-                                  <Table.Th>Payload</Table.Th>
+                                  <Table.Th style={{ width: 240 }}>Layout</Table.Th>
+                                  <Table.Th style={{ width: 240 }}>Payload</Table.Th>
+                                  <Table.Th style={{ width: 350 }}>Замечание</Table.Th>
                                 </Table.Tr>
                               </Table.Thead>
                               <Table.Tbody>
-                                {pageBlocks.map((block) => (
-                                  <Table.Tr key={block.id}>
-                                    <Table.Td>{block.order}</Table.Td>
-                                    <Table.Td><Badge variant="light">{block.type}</Badge></Table.Td>
-                                    <Table.Td><Code>{block.id}</Code></Table.Td>
-                                    <Table.Td>
-                                      <Code block>{prettyJson(block.layout)}</Code>
-                                    </Table.Td>
-                                    <Table.Td>
-                                      <Code block>{prettyJson(block.payload)}</Code>
-                                    </Table.Td>
-                                  </Table.Tr>
-                                ))}
+                                {pageBlocks.map((block) => {
+                                  const remark = remarksByBlock[block.id] ?? null;
+                                  const draftText = remarkDrafts[block.id] ?? remark?.text ?? "";
+                                  const saving = savingRemarkBlockId === block.id;
+                                  const deleting = deletingRemarkBlockId === block.id;
+
+                                  return (
+                                    <Table.Tr key={block.id}>
+                                      <Table.Td>{block.order}</Table.Td>
+                                      <Table.Td><Badge variant="light">{block.type}</Badge></Table.Td>
+                                      <Table.Td><Code>{block.id}</Code></Table.Td>
+                                      <Table.Td>
+                                        <Code block>{prettyJson(block.layout)}</Code>
+                                      </Table.Td>
+                                      <Table.Td>
+                                        <Code block>{prettyJson(block.payload)}</Code>
+                                      </Table.Td>
+                                      <Table.Td>
+                                        <Stack gap={6}>
+                                          <Textarea
+                                            autosize
+                                            minRows={2}
+                                            value={draftText}
+                                            placeholder="Комментарий для автора по этому блоку"
+                                            onChange={(event) => {
+                                              const text = event.currentTarget.value;
+                                              setRemarkDrafts((prev) => ({ ...prev, [block.id]: text }));
+                                            }}
+                                          />
+                                          <Group gap="xs">
+                                            <Button
+                                              size="xs"
+                                              loading={saving}
+                                              onClick={() => void handleSaveRemark(block.id)}
+                                            >
+                                              Сохранить
+                                            </Button>
+                                            <Button
+                                              size="xs"
+                                              color="red"
+                                              variant="light"
+                                              leftSection={<IconTrash size={12} />}
+                                              disabled={!remark}
+                                              loading={deleting}
+                                              onClick={() => void handleDeleteRemark(block.id)}
+                                            >
+                                              Удалить
+                                            </Button>
+                                          </Group>
+                                          {remark && (
+                                            <Text size="xs" c="dimmed">
+                                              Обновлено: {formatDateTime(remark.updatedAt)} · {remark.author.username}
+                                            </Text>
+                                          )}
+                                        </Stack>
+                                      </Table.Td>
+                                    </Table.Tr>
+                                  );
+                                })}
                                 {pageBlocks.length === 0 && (
                                   <Table.Tr>
-                                    <Table.Td colSpan={5}>
+                                    <Table.Td colSpan={6}>
                                       <Text size="sm" c="dimmed">В этой странице нет блоков.</Text>
                                     </Table.Td>
                                   </Table.Tr>
