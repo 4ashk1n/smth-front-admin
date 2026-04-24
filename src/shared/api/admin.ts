@@ -1,5 +1,6 @@
-﻿import type {
+import type {
   AdminModerateArticleResponse,
+  AdminModerateUserResponse,
   AdminReviewArticleListResponse,
   AdminUserArticleListResponse,
   AdminUserListResponse,
@@ -56,10 +57,34 @@ export function rejectArticle(articleId: string): Promise<AdminModerateArticleRe
   });
 }
 
+export function archiveArticle(articleId: string): Promise<AdminModerateArticleResponse> {
+  return requestWithAutoRefresh<AdminModerateArticleResponse>(`/admin/articles/${articleId}/archive`, {
+    method: "POST",
+  });
+}
+
+export function publishArchivedArticle(articleId: string): Promise<AdminModerateArticleResponse> {
+  return requestWithAutoRefresh<AdminModerateArticleResponse>(`/admin/articles/${articleId}/publish`, {
+    method: "POST",
+  });
+}
+
 export function getUsers(query: UsersQuery): Promise<AdminUserListResponse> {
   return requestWithAutoRefresh<AdminUserListResponse>("/admin/users", {
     method: "GET",
     query,
+  });
+}
+
+export function banUser(userId: string): Promise<AdminModerateUserResponse> {
+  return requestWithAutoRefresh<AdminModerateUserResponse>(`/admin/users/${userId}/ban`, {
+    method: "POST",
+  });
+}
+
+export function unbanUser(userId: string): Promise<AdminModerateUserResponse> {
+  return requestWithAutoRefresh<AdminModerateUserResponse>(`/admin/users/${userId}/unban`, {
+    method: "POST",
   });
 }
 

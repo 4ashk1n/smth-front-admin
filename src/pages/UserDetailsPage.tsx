@@ -22,7 +22,7 @@ import { showNotification } from "@mantine/notifications";
 import { IconArrowLeft, IconRefresh, IconSearch } from "@tabler/icons-react";
 import type { AdminUserListItem, ArticleMeta, ArticleStatus, UserMeta, UserMetrics } from "@smth/shared";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { getUserArticles, getUserById, getUserMetrics, getUsers } from "../shared/api";
+import { banUser, getUserArticles, getUserById, getUserMetrics, getUsers, unbanUser } from "../shared/api";
 import { formatDateTime } from "../shared/lib/formatDateTime";
 import { getErrorMessage } from "../shared/lib/getErrorMessage";
 import { statusColor, statusLabel } from "../shared/lib/status";
@@ -45,6 +45,7 @@ export function UserDetailsPage() {
   const [metrics, setMetrics] = useState<UserMetrics | null>(null);
 
   const [articles, setArticles] = useState<ArticleMeta[]>([]);
+  const [banLoading, setBanLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -62,11 +63,9 @@ export function UserDetailsPage() {
       setUserMeta(userResp.data);
       setMetrics(metricsResp.data);
 
-      if (!stateUser) {
-        const userListResp = await getUsers({ page: 1, limit: 50, search: userResp.data.username });
-        const found = userListResp.data.items.find((item) => item.id === userId) ?? null;
-        setAdminUser(found);
-      }
+      const userListResp = await getUsers({ page: 1, limit: 50, search: userResp.data.username });
+      const found = userListResp.data.items.find((item) => item.id === userId) ?? null;
+      setAdminUser(found);
     } catch (error) {
       showNotification({
         color: "red",
@@ -74,7 +73,7 @@ export function UserDetailsPage() {
         message: getErrorMessage(error, "Не удалось получить данные пользователя"),
       });
     }
-  }, [userId, stateUser]);
+  }, [userId]);
 
   const loadArticles = useCallback(async () => {
     if (!userId) return;
@@ -111,6 +110,34 @@ export function UserDetailsPage() {
   useEffect(() => {
     setPage(1);
   }, [debouncedSearch, status, userId]);
+
+  const handleToggleBan = useCallback(async () => {
+    if (!userId || !adminUser) return;
+    setBanLoading(true);
+    try {
+      const wasBanned = Boolean((adminUser as any).isBanned);
+      const response = wasBanned ? await unbanUser(userId) : await banUser(userId);
+      if (response?.data) {
+        setAdminUser(response.data as AdminUserListItem);
+      } else {
+        await loadUserInfo();
+      }
+      await loadArticles();
+      showNotification({
+        color: "teal",
+        title: "Статус пользователя обновлен",
+        message: wasBanned ? "Пользователь разбанен" : "Пользователь забанен",
+      });
+    } catch (error) {
+      showNotification({
+        color: "red",
+        title: "Ошибка",
+        message: getErrorMessage(error, "Не удалось изменить статус пользователя"),
+      });
+    } finally {
+      setBanLoading(false);
+    }
+  }, [adminUser, loadArticles, loadUserInfo, userId]);
 
   if (!userId) {
     return (
@@ -151,10 +178,23 @@ export function UserDetailsPage() {
             <Badge color={adminUser?.role === "admin" ? "teal" : adminUser?.role === "moderator" ? "cyan" : "gray"} variant="light">
               {adminUser?.role ?? "unknown"}
             </Badge>
+            <Badge color={(adminUser as any)?.isBanned ? "red" : "green"} variant="light">
+              {(adminUser as any)?.isBanned ? "banned" : "active"}
+            </Badge>
             <Text size="sm">{adminUser?.provider ?? "-"}</Text>
           </Group>
           <Text size="sm" mt={8}>{adminUser?.email ?? "Email недоступен"}</Text>
           <Text size="xs" c="dimmed" mt={8}>Создан: {formatDateTime(adminUser?.createdAt)}</Text>
+          <Button
+            size="xs"
+            mt={10}
+            color={(adminUser as any)?.isBanned ? "green" : "red"}
+            variant="light"
+            loading={banLoading}
+            onClick={() => void handleToggleBan()}
+          >
+            {(adminUser as any)?.isBanned ? "Разбанить" : "Забанить"}
+          </Button>
         </Paper>
         <Paper withBorder p="md" radius="md">
           <Text size="xs" c="dimmed" tt="uppercase">Метрики</Text>

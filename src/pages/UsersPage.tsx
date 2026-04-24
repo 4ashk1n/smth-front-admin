@@ -102,6 +102,9 @@ export function UsersPage() {
                     <Badge color={user.role === "admin" ? "teal" : user.role === "moderator" ? "cyan" : "gray"} variant="light">
                       {user.role}
                     </Badge>
+                    <Badge ml={8} color={(user as any).isBanned ? "red" : "green" } variant="light">
+                      {(user as any).isBanned ? "banned" : "active"}
+                    </Badge>
                   </Table.Td>
                   <Table.Td>
                     <Text size="sm">{user.email ?? "-"}</Text>

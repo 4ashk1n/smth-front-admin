@@ -21,10 +21,12 @@ import { IconArrowLeft, IconCheck, IconTrash, IconX } from "@tabler/icons-react"
 import type { Article, ArticleStatus, ReviewRemark } from "@smth/shared";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  archiveArticle,
   approveArticle,
   deleteArticleRemark,
   getArticleById,
   getArticleRemarks,
+  publishArchivedArticle,
   rejectArticle,
   upsertArticleRemark,
 } from "../shared/api";
@@ -193,12 +195,19 @@ export function ArticleDetailsPage() {
 
   const tree = useMemo(() => parseContentTree(article?.content), [article?.content]);
 
-  const handleModeration = useCallback(async (action: "approve" | "reject") => {
+  const handleModeration = useCallback(async (action: "approve" | "reject" | "archive" | "publish") => {
     if (!articleId || !article) return;
 
     setModerating(true);
     try {
-      const response = action === "approve" ? await approveArticle(articleId) : await rejectArticle(articleId);
+      const response =
+        action === "approve"
+          ? await approveArticle(articleId)
+          : action === "reject"
+            ? await rejectArticle(articleId)
+            : action === "archive"
+              ? await archiveArticle(articleId)
+              : await publishArchivedArticle(articleId);
       setArticle({
         ...article,
         status: response.data.status,
@@ -209,7 +218,14 @@ export function ArticleDetailsPage() {
       showNotification({
         color: "teal",
         title: "Статус обновлен",
-        message: action === "approve" ? "Статья опубликована" : "Статья возвращена в draft",
+        message:
+          action === "approve"
+            ? "Статья опубликована"
+            : action === "reject"
+              ? "Статья возвращена в draft"
+              : action === "archive"
+                ? "Статья отправлена в архив"
+                : "Статья опубликована из архива",
       });
     } catch (error) {
       showNotification({
@@ -330,6 +346,25 @@ export function ArticleDetailsPage() {
                 Reject
               </Button>
             </>
+          )}
+          {article?.status !== "archived" && (
+            <Button
+              color="orange"
+              variant="light"
+              loading={moderating}
+              onClick={() => void handleModeration("archive")}
+            >
+              Archive
+            </Button>
+          )}
+          {article?.status === "archived" && (
+            <Button
+              color="teal"
+              loading={moderating}
+              onClick={() => void handleModeration("publish")}
+            >
+              Publish
+            </Button>
           )}
         </Group>
       </Group>
