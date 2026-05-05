@@ -88,6 +88,16 @@ export function unbanUser(userId: string): Promise<AdminModerateUserResponse> {
   });
 }
 
+export function changeUserRole(
+  userId: string,
+  role: "user" | "moderator" | "admin",
+): Promise<AdminModerateUserResponse> {
+  return requestWithAutoRefresh<AdminModerateUserResponse>(`/admin/users/${userId}/role`, {
+    method: "PATCH",
+    body: { role },
+  });
+}
+
 export function getUserArticles(userId: string, query: UserArticlesQuery): Promise<AdminUserArticleListResponse> {
   return requestWithAutoRefresh<AdminUserArticleListResponse>(`/admin/users/${userId}/articles`, {
     method: "GET",

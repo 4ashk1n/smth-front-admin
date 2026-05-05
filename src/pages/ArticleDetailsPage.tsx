@@ -1,5 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
-import {
+﻿import {
   Badge,
   Box,
   Button,
@@ -17,12 +16,13 @@ import {
   Title,
 } from "@mantine/core";
 import { showNotification } from "@mantine/notifications";
+import type { Article, ArticleStatus, Block, BlockPayload, Content, Page, ReviewRemark, Topic } from "@smth/shared";
 import { IconArrowLeft, IconCheck, IconTrash, IconX } from "@tabler/icons-react";
-import type { Article, ArticleStatus, ReviewRemark } from "@smth/shared";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  archiveArticle,
   approveArticle,
+  archiveArticle,
   deleteArticleRemark,
   getArticleById,
   getArticleRemarks,
@@ -32,107 +32,11 @@ import {
 } from "../shared/api";
 import { formatDateTime } from "../shared/lib/formatDateTime";
 import { getErrorMessage } from "../shared/lib/getErrorMessage";
+import { stringify } from "../shared/lib/prettyJSON";
 import { statusColor, statusLabel } from "../shared/lib/status";
 
-type AnyRecord = Record<string, unknown>;
-
-type TopicNode = {
-  id: string;
-  title: string;
-  order: number;
-};
-
-type PageNode = {
-  id: string;
-  topicId: string;
-  order: number;
-};
-
-type BlockNode = {
-  id: string;
-  pageId: string;
-  type: string;
-  order: number;
-  layout: unknown;
-  payload: AnyRecord;
-};
-
-function asRecord(value: unknown): AnyRecord | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as AnyRecord;
-}
-
-function asString(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function asNumber(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function parseContentTree(content: unknown) {
-  const root = asRecord(content);
-  if (!root) {
-    return { topics: [] as TopicNode[], pages: [] as PageNode[], blocks: [] as BlockNode[] };
-  }
-
-  const topicsRaw = Array.isArray(root.topics) ? root.topics : [];
-  const pagesRaw = Array.isArray(root.pages) ? root.pages : [];
-  const blocksRaw = Array.isArray(root.blocks) ? root.blocks : [];
-
-  const topics = topicsRaw
-    .map((item, idx) => {
-      const rec = asRecord(item);
-      if (!rec) return null;
-      return {
-        id: asString(rec.id, `topic_${idx}`),
-        title: asString(rec.title, "Untitled topic"),
-        order: asNumber(rec.order, idx + 1),
-      };
-    })
-    .filter((item): item is TopicNode => item !== null)
-    .sort((a, b) => a.order - b.order);
-
-  const pages = pagesRaw
-    .map((item, idx) => {
-      const rec = asRecord(item);
-      if (!rec) return null;
-      return {
-        id: asString(rec.id, `page_${idx}`),
-        topicId: asString(rec.topicId),
-        order: asNumber(rec.order, idx),
-      };
-    })
-    .filter((item): item is PageNode => item !== null)
-    .sort((a, b) => a.order - b.order);
-
-  const blocks = blocksRaw
-    .map((item, idx) => {
-      const rec = asRecord(item);
-      if (!rec) return null;
-      const { id, pageId, type, order, layout, ...rest } = rec;
-
-      return {
-        id: asString(id, `block_${idx}`),
-        pageId: asString(pageId),
-        type: asString(type, "unknown"),
-        order: asNumber(order, idx),
-        layout,
-        payload: rest,
-      };
-    })
-    .filter((item): item is BlockNode => item !== null)
-    .sort((a, b) => a.order - b.order);
-
-  return { topics, pages, blocks };
-}
-
-function prettyJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
+type BlockWithPayload = Pick<Block, "id" | "type" | "pageId" | "layout"> & {
+  payload: Object;
 }
 
 function statusBadge(status: ArticleStatus) {
@@ -193,7 +97,25 @@ export function ArticleDetailsPage() {
     void load();
   }, [load]);
 
-  const tree = useMemo(() => parseContentTree(article?.content), [article?.content]);
+  const tree = useMemo(() => {
+    const ret: any = article?.content as Content;
+    if (!ret) return { blocks: [], pages: [], topics: [] };
+    ret.blocks = ret.blocks.map((block: BlockPayload) => {
+      const { id, pageId, type, layout, ...payload } = block;
+      return {
+        id,
+        pageId,
+        type,
+        layout,
+        payload,
+      }
+    })
+    return ret as {
+      blocks: BlockWithPayload[];
+      pages: Page[];
+      topics: Topic[];
+    };
+  }, [article?.content]);
 
   const handleModeration = useCallback(async (action: "approve" | "reject" | "archive" | "publish") => {
     if (!articleId || !article) return;
@@ -369,7 +291,7 @@ export function ArticleDetailsPage() {
         </Group>
       </Group>
 
-      {article && (
+      {article && tree && (
         <>
           <Grid>
             <Grid.Col span={8}>
@@ -426,7 +348,6 @@ export function ArticleDetailsPage() {
                     {topicPages.map((page) => {
                       const pageBlocks = tree.blocks
                         .filter((block) => block.pageId === page.id)
-                        .sort((a, b) => a.order - b.order);
 
                       return (
                         <Paper key={page.id} withBorder p="sm" radius="md" mt="sm" ml="md">
@@ -442,9 +363,8 @@ export function ArticleDetailsPage() {
                             <Table miw={1220} verticalSpacing="xs">
                               <Table.Thead>
                                 <Table.Tr>
-                                  <Table.Th style={{ width: 90 }}>Order</Table.Th>
+                                  <Table.Th style={{ width: 180 }}>ID</Table.Th>
                                   <Table.Th style={{ width: 100 }}>Type</Table.Th>
-                                  <Table.Th style={{ width: 180 }}>Block ID</Table.Th>
                                   <Table.Th style={{ width: 240 }}>Layout</Table.Th>
                                   <Table.Th style={{ width: 240 }}>Payload</Table.Th>
                                   <Table.Th style={{ width: 350 }}>Замечание</Table.Th>
@@ -459,14 +379,13 @@ export function ArticleDetailsPage() {
 
                                   return (
                                     <Table.Tr key={block.id}>
-                                      <Table.Td>{block.order}</Table.Td>
-                                      <Table.Td><Badge variant="light">{block.type}</Badge></Table.Td>
                                       <Table.Td><Code>{block.id}</Code></Table.Td>
+                                      <Table.Td><Badge variant="light">{block.type}</Badge></Table.Td>
                                       <Table.Td>
-                                        <Code block>{prettyJson(block.layout)}</Code>
+                                        <Code block>{stringify(block.layout, 7)}</Code>
                                       </Table.Td>
                                       <Table.Td>
-                                        <Code block>{prettyJson(block.payload)}</Code>
+                                        <Code block>{stringify(block.payload, 7)}</Code>
                                       </Table.Td>
                                       <Table.Td>
                                         <Stack gap={6}>

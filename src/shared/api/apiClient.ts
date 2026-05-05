@@ -3,7 +3,7 @@
 export type ApiRequestOptions = {
   method?: ApiMethod;
   query?: Record<string, string | number | boolean | null | undefined>;
-  body?: unknown;
+  body?: any;
   headers?: Record<string, string>;
   signal?: AbortSignal;
   baseUrl?: string;
@@ -13,7 +13,7 @@ export type ApiRequestOptions = {
 
 export type ApiError = Error & {
   status: number;
-  data?: unknown;
+  data?: any;
 };
 
 const DEFAULT_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "/api";
@@ -33,7 +33,7 @@ function buildUrl(path: string, query?: ApiRequestOptions["query"], baseUrl = DE
   return url.toString();
 }
 
-function isBodySerializable(body: unknown): body is Record<string, unknown> {
+function isBodySerializable(body: any): body is Record<string, any> {
   return !!body && typeof body === "object" && !(body instanceof FormData) && !(body instanceof Blob) && !(body instanceof URLSearchParams);
 }
 
@@ -72,7 +72,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   const response = await fetch(url, requestInit);
 
   if (!response.ok) {
-    let errorData: unknown;
+    let errorData: any;
     try {
       errorData = await response.clone().json();
     } catch {

@@ -4,6 +4,7 @@ export {
   archiveArticle,
   approveArticle,
   banUser,
+  changeUserRole,
   deleteArticleRemark,
   getArticleById,
   getArticleRemarks,

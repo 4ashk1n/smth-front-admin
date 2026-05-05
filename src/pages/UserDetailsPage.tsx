@@ -22,7 +22,7 @@ import { showNotification } from "@mantine/notifications";
 import { IconArrowLeft, IconRefresh, IconSearch } from "@tabler/icons-react";
 import type { AdminUserListItem, ArticleMeta, ArticleStatus, UserMeta, UserMetrics } from "@smth/shared";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { banUser, getUserArticles, getUserById, getUserMetrics, getUsers, unbanUser } from "../shared/api";
+import { banUser, changeUserRole, fetchMe, getUserArticles, getUserById, getUserMetrics, getUsers, unbanUser } from "../shared/api";
 import { formatDateTime } from "../shared/lib/formatDateTime";
 import { getErrorMessage } from "../shared/lib/getErrorMessage";
 import { statusColor, statusLabel } from "../shared/lib/status";
@@ -43,9 +43,13 @@ export function UserDetailsPage() {
   const [userMeta, setUserMeta] = useState<UserMeta | null>(null);
   const [adminUser, setAdminUser] = useState<AdminUserListItem | null>(stateUser);
   const [metrics, setMetrics] = useState<UserMetrics | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<"user" | "moderator" | "admin" | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [nextRole, setNextRole] = useState<"user" | "moderator" | "admin" | null>(null);
 
   const [articles, setArticles] = useState<ArticleMeta[]>([]);
   const [banLoading, setBanLoading] = useState(false);
+  const [roleLoading, setRoleLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -59,13 +63,16 @@ export function UserDetailsPage() {
     if (!userId) return;
 
     try {
-      const [userResp, metricsResp] = await Promise.all([getUserById(userId), getUserMetrics(userId)]);
+      const [meResp, userResp, metricsResp] = await Promise.all([fetchMe(), getUserById(userId), getUserMetrics(userId)]);
+      setCurrentUserRole(meResp.data.role);
+      setCurrentUserId(meResp.data.id);
       setUserMeta(userResp.data);
       setMetrics(metricsResp.data);
 
       const userListResp = await getUsers({ page: 1, limit: 50, search: userResp.data.username });
       const found = userListResp.data.items.find((item) => item.id === userId) ?? null;
       setAdminUser(found);
+      setNextRole(found?.role ?? null);
     } catch (error) {
       showNotification({
         color: "red",
@@ -111,11 +118,37 @@ export function UserDetailsPage() {
     setPage(1);
   }, [debouncedSearch, status, userId]);
 
+  const canBanByRole = useMemo(() => {
+    if (!adminUser || !currentUserRole || !currentUserId) return false;
+    if (adminUser.id === currentUserId) return false;
+    if (currentUserRole === "admin") return true;
+    if (currentUserRole === "moderator") return adminUser.role === "user";
+    return false;
+  }, [adminUser, currentUserId, currentUserRole]);
+
+  const banDisabledReason = useMemo(() => {
+    if (!adminUser || !currentUserRole || !currentUserId) return "Недостаточно данных о сессии";
+    if ((adminUser as any).isBanned) return "";
+    if (adminUser.id === currentUserId) return "Нельзя банить самого себя";
+    if (currentUserRole === "moderator" && (adminUser.role === "admin" || adminUser.role === "moderator")) {
+      return "Модератор не может банить администраторов и модераторов";
+    }
+    return "";
+  }, [adminUser, currentUserId, currentUserRole]);
+
   const handleToggleBan = useCallback(async () => {
     if (!userId || !adminUser) return;
+    const wasBanned = Boolean((adminUser as any).isBanned);
+    if (!wasBanned && !canBanByRole) {
+      showNotification({
+        color: "yellow",
+        title: "Операция недоступна",
+        message: banDisabledReason || "Недостаточно прав для блокировки этого пользователя",
+      });
+      return;
+    }
     setBanLoading(true);
     try {
-      const wasBanned = Boolean((adminUser as any).isBanned);
       const response = wasBanned ? await unbanUser(userId) : await banUser(userId);
       if (response?.data) {
         setAdminUser(response.data as AdminUserListItem);
@@ -137,7 +170,33 @@ export function UserDetailsPage() {
     } finally {
       setBanLoading(false);
     }
-  }, [adminUser, loadArticles, loadUserInfo, userId]);
+  }, [adminUser, banDisabledReason, canBanByRole, loadArticles, loadUserInfo, userId]);
+
+  const handleChangeRole = useCallback(async () => {
+    if (!userId || !adminUser || !nextRole) return;
+    if (currentUserRole !== "admin") return;
+    if (nextRole === adminUser.role) return;
+
+    setRoleLoading(true);
+    try {
+      const response = await changeUserRole(userId, nextRole);
+      setAdminUser(response.data as AdminUserListItem);
+      setNextRole(response.data.role);
+      showNotification({
+        color: "teal",
+        title: "Роль обновлена",
+        message: `Новая роль: ${response.data.role}`,
+      });
+    } catch (error) {
+      showNotification({
+        color: "red",
+        title: "Ошибка",
+        message: getErrorMessage(error, "Не удалось изменить роль пользователя"),
+      });
+    } finally {
+      setRoleLoading(false);
+    }
+  }, [adminUser, currentUserRole, nextRole, userId]);
 
   if (!userId) {
     return (
@@ -191,10 +250,38 @@ export function UserDetailsPage() {
             color={(adminUser as any)?.isBanned ? "green" : "red"}
             variant="light"
             loading={banLoading}
+            disabled={!(adminUser as any)?.isBanned && !canBanByRole}
             onClick={() => void handleToggleBan()}
           >
             {(adminUser as any)?.isBanned ? "Разбанить" : "Забанить"}
           </Button>
+          {!(adminUser as any)?.isBanned && banDisabledReason && (
+            <Text size="xs" c="dimmed" mt={6}>{banDisabledReason}</Text>
+          )}
+          {currentUserRole === "admin" && (
+            <Group mt={10} align="end">
+              <Select
+                label="Роль пользователя"
+                value={nextRole}
+                onChange={(value) => setNextRole((value as "user" | "moderator" | "admin" | null) ?? null)}
+                data={[
+                  { value: "user", label: "user" },
+                  { value: "moderator", label: "moderator" },
+                  { value: "admin", label: "admin" },
+                ]}
+                w={160}
+              />
+              <Button
+                size="xs"
+                variant="light"
+                loading={roleLoading}
+                disabled={!nextRole || nextRole === adminUser?.role}
+                onClick={() => void handleChangeRole()}
+              >
+                Сменить роль
+              </Button>
+            </Group>
+          )}
         </Paper>
         <Paper withBorder p="md" radius="md">
           <Text size="xs" c="dimmed" tt="uppercase">Метрики</Text>
