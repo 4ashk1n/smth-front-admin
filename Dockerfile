@@ -1,13 +1,16 @@
-FROM node:20-alpine AS builder
+﻿FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY smth-front-admin/package*.json ./smth-front-admin/
 COPY smth-shared ./smth-shared
+WORKDIR /app/smth-shared
+RUN npm ci --ignore-scripts
+RUN npm run build
 
+WORKDIR /app
+COPY smth-front-admin/package*.json ./smth-front-admin/
 WORKDIR /app/smth-front-admin
 RUN npm ci
-
 COPY smth-front-admin ./
 RUN npm run build
 
